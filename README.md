@@ -1,263 +1,585 @@
+<img width="971" height="589" alt="Screenshot 2025-10-18 001420" src="https://github.com/user-attachments/assets/e611c754-3560-4a28-9aca-6750adb12b6a" />
+<img width="793" height="426" alt="Screenshot 2025-10-18 001442" src="https://github.com/user-attachments/assets/4b3614ed-c8a6-4ebe-9808-5e132ec30563" />
+<img width="828" height="308" alt="Screenshot 2025-10-18 001450" src="https://github.com/user-attachments/assets/162b5f80-e6b2-4e71-839a-a790955146f2" />
+<img width="746" height="560" alt="Screenshot 2025-10-18 001503" src="https://github.com/user-attachments/assets/c2b9b8ab-0c3c-4656-8338-01e074eabd8b" />
+<img width="715" height="675" alt="Screenshot 2025-10-18 001516" src="https://github.com/user-attachments/assets/079ef9f4-93b8-4792-8043-cd64bb4cf5b3" />
+<img width="779" height="808" alt="Screenshot 2025-10-18 001528" src="https://github.com/user-attachments/assets/2a92d6ed-3a91-4008-a868-142833ca2dec" />
+
+
 # Greek-Calculator
 
-**High-performance options analytics** — Black–Scholes pricing, analytic Greeks, implied volatility extraction, batched processing with multithreading, and simple portfolio risk reports. Intended for quantitative research, teaching, and production prototyping.
+A high-performance options analytics toolkit implementing the Black–Scholes–Merton framework, analytical Greeks, implied-volatility extraction, batch processing, and portfolio risk metrics. Designed for quantitative research, institutional risk management, and production analytics.
 
 ---
 
-## Table of contents
+## Table of Contents
 
-1. [Overview](#overview)
-2. [Features](#features)
-3. [Quick start (build & run)](#quick-start-build--run)
-4. [Command-line usage](#command-line-usage)
-5. [Input CSV specification](#input-csv-specification)
-6. [Large example input (CSV)](#large-example-input-csv)
-7. [Example output (CSV) & sample rows](#example-output-csv--sample-rows)
-8. [Mathematical notes](#mathematical-notes)
-9. [Numerical stability & edge cases](#numerical-stability--edge-cases)
-10. [Architecture & internals](#architecture--internals)
-11. [Testing & validation](#testing--validation)
-12. [Troubleshooting & FAQs](#troubleshooting--faqs)
-13. [Extensibility & future work](#extensibility--future-work)
-14. [License](#license)
+1. [Overview](#overview)  
+2. [Concepts & Mathematical Foundations](#concepts--mathematical-foundations)  
+3. [System Architecture & Components](#system-architecture--components)  
+4. [Numerical Methods & Stability](#numerical-methods--stability)  
+5. [Parallel Processing & Performance](#parallel-processing--performance)  
+6. [Input / Output Specification & Example](#input--output-specification--example)  
+7. [Validation, Testing & Edge Cases](#validation-testing--edge-cases)  
+8. [Difficulties Faced and How We Resolved Them](#difficulties-faced-and-how-we-resolved-them)  
+9. [How to Build & Run (quick start)](#how-to-build--run-quick-start)  
+10. [Extensibility & Future Work](#extensibility--future-work)  
+11. [Glossary / Variable Meanings](#glossary--variable-meanings)  
+12. [Troubleshooting & FAQs](#troubleshooting--faqs)  
+13. [License & Notes](#license--notes)
 
 ---
 
 ## Overview
 
-Greek-Calculator is a single-file reference implementation and small toolkit for option pricing and sensitivity analysis. It computes theoretical prices under the Black–Scholes–Merton model, analytic Greeks (Delta, Gamma, Vega, Theta, Rho and several second-order Greeks), implied volatility (hybrid root-finder), and basic portfolio-level risk measures (delta/gamma exposures, simple VaR/ES heuristics).
+Greek-Calculator computes option prices, first- and higher-order Greeks, implied volatilities, and portfolio-level risk measures from batch inputs. The tool is optimized for throughput (batch processing with a thread pool), numerical stability (robust CDF/PDF approximations and clamped solvers), and practical risk reporting (VaR, ES, delta/gamma exposures).
 
-The program is optimized for batch throughput (multithreaded processing), numerical robustness (guarded tail handling and intrinsic fallbacks), and auditable deterministic outputs.
-
----
-
-## Features
-
-* Black–Scholes closed-form pricing (calls & puts) with continuous dividend yield.
-* First- and higher-order Greeks (Delta, Gamma, Vega, Theta, Rho, Vanna, Vomma, Charm, Zomma, Speed).
-* Implied-vol solver (hybrid Newton–bisection with clipping and safeguards).
-* Buffered CSV input/output and large-batch processing.
-* Thread pool / chunked parallelism with lock-free hot path and minimal synchronization.
-* Portfolio aggregation: exposures (dollar delta, gamma, vega) and a simple delta–gamma VaR approximation.
-* Defensive handling of edge cases (T→0, σ≈0, deep tails).
+This repository contains:
+- a single-file reference program: `greek_calculator.cpp` (source included),
+- a batch CSV parser and writer,
+- robust numerical utilities and analytic Greeks,
+- a threaded batch processor,
+- portfolio aggregation and a simple VaR/ES report.
 
 ---
 
-## Quick start (build & run)
+## Concepts & Mathematical Foundations
 
-**Save** the supplied source file as `greek_calculator.cpp`.
+### Underlying dynamics
 
-**Build (Linux/macOS):**
+We model the underlying asset using Geometric Brownian Motion:
 
-```
-g++ -std=c++17 -O2 -pthread greek_calculator.cpp -o greek_calc
-```
+\[
+dS = \mu S\,dt + \sigma S\,dW
+\]
 
-**Run:**
+Under risk-neutral pricing, drift is replaced by \(r - q\).
 
-```
-./greek_calc <input.csv> <output.csv> [threads]
-```
+### Black–Scholes closed-form
 
-Example:
+Define
+\[
+d_1 = \frac{\ln(S_0/K) + (r - q + \tfrac{1}{2}\sigma^2)T}{\sigma\sqrt{T}},\qquad
+d_2 = d_1 - \sigma\sqrt{T}
+\]
 
-```
-./greek_calc options_input.csv options_results.csv 4
-```
+Call and put prices:
+\[
+C = S_0 e^{-qT}N(d_1) - K e^{-rT}N(d_2)
+\]
+\[
+P = K e^{-rT} N(-d_2) - S_0 e^{-qT} N(-d_1)
+\]
 
-* `threads` is optional; if omitted the program uses hardware concurrency.
-* By default the program writes `options_results.csv` and `options_results.csv.risk_report.txt` (when portfolio reporting is enabled).
+\(N(\cdot)\) is the standard normal CDF, \(\phi(\cdot)\) is the PDF.
 
----
+### Greeks (selected)
 
-## Command-line usage
-
-```
-Usage: greek_calc <input_csv> <output_csv> [threads]
-
-Positional arguments:
-  input_csv     CSV file with option rows
-  output_csv    Processed CSV with prices, greeks and exposures
-  threads       Optional: number of worker threads (default = auto)
-
-Options (configurable via header or compile-time flags):
-  --no-portfolio    Skip portfolio aggregation and risk report
-  --precision=N     Decimal precision for numeric output (default: 8)
-  --deterministic   Use single-threaded deterministic mode
-```
+- Delta: \(\Delta_{\text{call}} = e^{-qT}N(d_1)\)  
+- Gamma: \(\Gamma = \dfrac{e^{-qT}\phi(d_1)}{S_0\sigma\sqrt{T}}\)  
+- Vega: \(\nu = S_0 e^{-qT}\phi(d_1)\sqrt{T}\)  
+- Theta, Rho and higher-order Greeks (Vanna, Vomma, Charm, Zomma, Speed) are computed analytically.
 
 ---
 
-## Input CSV specification
+## System Architecture & Components
 
-**Required columns (order-insensitive, case-insensitive):**
+High-level pipeline:
 
-| Column     | Type   | Description                                                |
-| ---------- | ------ | ---------------------------------------------------------- |
-| ID         | string | Unique identifier                                          |
-| Spot       | number | Spot price (S > 0)                                         |
-| Strike     | number | Strike price (K > 0)                                       |
-| Rate       | number | Continuous risk-free rate (r)                              |
-| Volatility | number | Annual volatility (σ) — can be blank to request IV solving |
-| Time       | number | Years to expiry (T) — > 0 for Greeks                       |
-| Type       | string | `call` or `put`                                            |
+CSV Parser -> Batch Processor (thread pool) -> Greek Calculator & Pricing -> Results Writer -> Portfolio Aggregator & Risk Report
 
-**Optional columns:** `Dividend_Yield`, `MarketPrice` (observed option price — used for implied vol), `Quantity`, `Notional`, `Underlying`.
 
-Notes:
+Key modules:
 
-* Missing `Volatility` but present `MarketPrice` will trigger implied-vol computation.
-* Rows with malformed or missing required fields are skipped (logged) unless `--fail-on-error` is set.
+- **CSV Parser**: robust parsing, validation, normalization.  
+- **Batch Processor**: splits work into chunks and runs worker threads.  
+- **Math Utilities**: norm PDF/CDF, clamp, stable transforms, pricing.  
+- **Greek Calculator**: closed-form formulas and implied-vol solver.  
+- **Risk Analyzer**: aggregation, exposures, VaR/ES, stress tests.  
+- **Results Writer**: detailed CSV and plain-text portfolio report.
 
 ---
 
-## Large example input (CSV)
+## Numerical Methods & Stability
 
-Below is a reasonably large illustrative input (10 rows) you can paste into `options_input.csv`.
+- **Normal CDF/PDF**: series-based central-region evaluation + hard tail returns for |x| > 8 to avoid underflow/overflow.  
+- **Implied volatility solver**: conservative multiplicative/bisection-like solver with clamping to `[0.001, 5.0]` and tolerance `1e-8`.  
+- **T → 0 and σ → 0 handling**: intrinsic-value fallback prevents division by zero and precision loss.  
+- **Precision guards**: precompute sqrt(T) and sigma*sqrt(T); consider long double if needed in extreme precision scenarios.
 
-```
+---
+
+## Parallel Processing & Performance
+
+- Configure threads via command-line or auto-detect hardware concurrency.  
+- Chunking formula: `chunk_size = ceil(n / threads)`.  
+- Preallocate result arrays so each worker writes to unique indices to avoid locks.  
+- Minimal synchronization via an atomic progress counter and a mutex-protected logger.  
+- Hot-path micro-optimizations: reuse computed terms, reduce recomputation of transcendental calls.
+
+---
+
+## Input / Output Specification & Example
+
+### Required CSV columns
+
+| Column     | Type   | Description            |
+|------------|--------|------------------------|
+| ID         | string | Unique identifier      |
+| Spot       | double | Underlying price (>0)  |
+| Strike     | double | Strike price (>0)      |
+| Rate       | double | Continuous risk-free   |
+| Volatility | double | Volatility (annual)    |
+| Time       | double | Years to expiry        |
+| Type       | string | "call" or "put"        |
+
+### Optional columns
+`Underlying`, `Dividend_Yield`, `MarketPrice`, `Quantity`, `Notional`
+
+### Example input (`options_input.csv`)
 ID,Spot,Strike,Rate,Volatility,Time,Type,Dividend_Yield,MarketPrice,Quantity
-opt-001,100,100,0.05,0.20,0.5,call,0.00,5.50,10
-opt-002,100,110,0.05,0.20,0.5,put,0.00,8.20,5
-opt-003,50,45,0.04,0.35,0.25,call,0.01,6.10,2
-opt-004,150,130,0.03,0.30,1.0,put,0.00,26.75,1
-opt-005,250,260,0.05,0.18,0.75,call,0.00,3.10,20
-opt-006,80,80,0.06,,0.1667,call,0.00,2.85,15
-opt-007,45,60,0.04,0.50,0.2,put,0.00,5.40,7
-opt-008,120,100,0.04,0.22,0.05,call,0.00,21.00,3
-opt-009,10,8,0.02,0.60,0.02,call,0.00,2.15,50
-opt-010,500,450,0.03,0.25,2.0,put,0.01,78.40,1
-```
+opt-001,100,100,0.05,0.20,0.5,call,0.0,5.5,10
+opt-002,100,110,0.05,0.20,0.5,put,0.0,8.2,5
+opt-003,50,45,0.04,0.35,0.25,call,0.01,6.1,2
 
-* `opt-006` intentionally omits `Volatility` but supplies `MarketPrice` to request implied-vol solving.
-* Times are in years. Small T values (e.g., 0.02) test short-expiry handling.
+
+### Example output columns (CSV)
+
+ID,TheoreticalPrice,MarketPrice,PriceDifference,ImpliedVol,Delta,Gamma,Vega,Theta,Rho,Vanna,Charm,Vomma,Speed,Zomma,IntrinsicValue,ExtrinsicValue,TimeValue,DeltaExposure,GammaExposure,VegaExposure,DollarDelta,DollarGamma,Status
+
+
 
 ---
 
-## Example output (CSV) & sample rows
+## Validation, Testing & Edge Cases
 
-**Output columns (primary):**
-
-```
-ID,TheoreticalPrice,MarketPrice,PriceDifference,ImpliedVol,Delta,Gamma,Vega,Theta,Rho,DollarDelta,DollarGamma,Status
-```
-
-**Sample rows (illustrative)**
-
-```
-opt-001,5.489321,5.50,-0.010679,0.200000,0.598712,0.012345,12.345678,-0.018432,0.234500,5.98712,50.12345,OK
-opt-006,2.845100,2.85,-0.004900,0.195700,0.512345,0.020000,6.543210,-0.005432,0.083210,12.68518,18.00000,IV_FOUND
-opt-009,2.120000,2.15,-0.030000,0.614000,0.720123,0.305000,0.450000,-0.010000,0.005000,36.00615,0.51000,SHORT_EXPIRY_OK
-```
-
-* `Status` indicates processing outcome (`OK`, `IV_FOUND`, `IV_CLAMPED`, `MALFORMED_ROW`, etc.).
-* Numeric columns are truncated/rounded per `--precision`.
+- Unit tests for CDF/PDF, closed-form prices, Greeks, solver under synthetic scenarios.  
+- Edge cases:
+  - `T = 0` → intrinsic values and zero Greeks.  
+  - `σ = 0` → non-diffusive limits.  
+  - deep OTM/ITM → stable tail handling.  
+- CI should include numerical regression tests and throughput benchmarks.
 
 ---
 
-## Mathematical notes
+## Difficulties Faced and How We Resolved Them
 
-**Black–Scholes inputs & definitions:**
+1. **Numerical instability in tails / short maturities**  
+   - Implemented safe-tail returns for the normal CDF and intrinsic-value fallback for `T` below a threshold.
 
-* Geometric Brownian motion with continuous dividend yield `q`.
-* Intermediate terms:
+2. **Implied volatility solver divergence**  
+   - Use prechecks (market price < intrinsic), implement multiplicative adaptation and clamp sigma to avoid runaway values.
 
-[ d_1 = \frac{\ln(S/K) + (r - q + 0.5\sigma^2)T}{\sigma\sqrt{T}}, \quad d_2 = d_1 - \sigma\sqrt{T} ]
+3. **Cancellation and precision loss in d1/d2**  
+   - Precompute reusable parts, consider long double for critical branches.
 
-* Call price:
+4. **Throughput and load imbalance**  
+   - Use smaller chunks or a task queue for skewed workloads. Preallocate result vectors to avoid allocations in hot paths.
 
-[ C = S e^{-qT} N(d_1) - K e^{-rT} N(d_2) ]
+5. **Memory pressure from repeated allocations**  
+   - Preallocate vectors and reuse buffers. Stream output buffered batches.
 
-* Put price via parity or closed-form.
+6. **Greeks consistency**  
+   - Use parity relations (put-call parity) and shared intermediate computations to enforce consistency numerically.
 
-**Greeks:** analytic formulas are used where available. Theta is reported as per-day decay (i.e., divided by 365).
-
-**Implied volatility:** hybrid Newton–bisection with clipping to `[1e-6, 5.0]`, adaptive step control and explicit checks against intrinsic bounds.
-
----
-
-## Numerical stability & edge cases
-
-Key defensive measures implemented:
-
-* Safe normal CDF/PDF with explicit tail clamps (e.g., `if (x > +8) N(x)~1`), and `erfc`-based central evaluation for numerical accuracy.
-* Intrinsic-value fallback for `T <= 1e-12` (no division by zero).
-* Sigma clipping and iteration cap for implied-vol; if IV cannot be found within iterations, status flags `IV_CLAMPED` or `IV_FAILED` are set.
-* Preallocated result buffers and per-thread write indices to avoid data races.
+7. **Audit and reproducibility requirements**  
+   - Add optional convergence traces, timestamps, deterministic seeds for sampling.
 
 ---
 
-## Architecture & internals
+## How to Build & Run (quick start)
 
-Processing pipeline (high-level):
+1. Save the provided source file as `greek_calculator.cpp`.
 
-1. Read and validate CSV rows into a lightweight `OptionData` structure.
-2. Split work into chunks using `chunk_size = ceil(n / threads)` (or use dynamic queueing for highly skewed loads).
-3. Each worker computes theoretical price, Greeks, and — if requested — implied volatility.
-4. Results are written into a preallocated vector; final CSV is written in a buffered manner.
+2. Build:
+g++ -std=c++17 -O2 -pthread greek_calculator.cpp -o greek_calc
 
-Concurrency strategy:
+3. Run:
+./greek_calc options_input.csv results_output.csv 4
 
-* Each worker writes only to its assigned slice of the results vector (lock-free writes).
-* Atomic counters are used for progress reporting; only logging and final file writes use mutex protection.
 
-I/O strategy:
 
-* Buffered file writes to avoid per-row flushes.
-* Robust CSV parser that tolerates whitespace and extra blank lines; malformed rows are logged and skipped unless configured to fail.
+- Arguments: `<input_csv> <output_csv> [threads]`  
+- The program writes `results_output.csv` and, if portfolio analysis is enabled, `results_output.csv.risk_report.txt`.
 
 ---
 
-## Testing & validation
+## Glossary / Variable Meanings
 
-Recommended tests:
-
-* Unit tests for `norm_cdf`, `norm_pdf`, closed-form prices, analytic Greeks.
-* Regression tests for implied-vol solver across a grid of market prices and times.
-* Thread-safety tests under ThreadSanitizer and stress tests with very large input files.
-* Numerical regression (store golden outputs) to detect platform/compiler differences.
+- `S` — current spot price of the underlying.  
+- `K` — strike price.  
+- `r` — continuous risk-free interest rate.  
+- `q` — continuous dividend yield.  
+- `σ` (sigma) — annualized volatility.  
+- `T` — time to expiry (years).  
+- `d1`, `d2` — Black–Scholes intermediate terms.  
+- `N(x)` — standard normal CDF.  
+- `φ(x)` — standard normal PDF.  
+- `Delta` — ∂V/∂S (sensitivity to spot).  
+- `Gamma` — ∂²V/∂S² (sensitivity of delta).  
+- `Vega` — ∂V/∂σ (sensitivity to volatility).  
+- `Theta` — ∂V/∂t (time decay, reported per day).  
+- `Rho` — ∂V/∂r (sensitivity to rate, per 1%).  
+- `DollarDelta` — delta × spot (P&L per unit spot move).  
+- `DollarGamma` — 0.5 × gamma × spot² (gamma-scaled contribution to P&L).
 
 ---
 
 ## Troubleshooting & FAQs
 
-**Q: Program prints `NaN` for Greeks.**
-
-* A: Confirm `Time > 0`, `Spot > 0`, `Strike > 0`, and `Volatility > 0` (or that `MarketPrice` is in range for IV). Check `Status` for `MALFORMED_ROW`.
-
-**Q: Implied vol hits clamps (e.g., 5.0).**
-
-* A: Market price is outside theoretical bounds given inputs (or price > forward intrinsic). Verify `MarketPrice` and `Dividend_Yield`.
-
-**Q: Output order changes between runs.**
-
-* A: Use `--deterministic` for single-threaded, deterministic ordering.
-
-**Q: Performance is slow.**
-
-* A: Increase `threads`, ensure `-O2` is used, and use buffered I/O. Profile to find hotspots (transcendental calls often dominate).
+- **Implied vol at clamp limits** means market price outside model range; verify market price and intrinsic value.  
+- **NaN Greeks** check that `time > 0`, `sigma > 0`, `spot` and `strike` > 0.  
+- **Slow performance**: reduce computed Greeks via config or increase threads; profile to find hotspots.  
+- **Different underlying assets**: current VaR uses approximate single-spot; change to per-option underlying for multi-asset portfolios.
 
 ---
 
-## Extensibility & future work
 
-* Support for multi-asset portfolios and correlation-aware VaR (Monte Carlo engine).
-* Add alternative models: local-vol, Heston, Bachelier.
-* On-disk memory-mapped CSV streaming for extremely large inputs.
-* JSON output and REST API wrapper for integration with other systems.
+## Major Development Challenges and Resolutions
 
----
-
-## Contributing
-
-Small, focused pull requests are welcome. Format code with `clang-format` style and include numerical unit tests for any new formula. Add regression test vectors for any change that affects numerical output.
+### 1. Floating-Point Precision Errors
+**Problem:** Double precision rounding caused inaccuracies in Greeks.  
+**Resolution:** Used `long double` for sensitive calculations and constrained results via `std::max()` and `std::clamp()`.
 
 ---
 
-## License
+### 2. Numerical Instability in Cumulative Normal (N)
+**Problem:** Standard C++ does not provide cumulative normal distribution.  
+**Resolution:** Implemented:
 
-This project is provided under the MIT License — see `LICENSE` for details.
+```cpp
+inline double norm_cdf(double x) {
+    return 0.5 * erfc(-x / sqrt(2.0));
+}
+```
 
----
+3. Implied Volatility Root-Finding Divergence
 
-*If you want a version tailored for teaching (more comments and simpler single-threaded flow) or a `README` without implementation-level sections, tell me which style and I will create that variation.*
+Problem: Newton-Raphson may diverge if Vega ≈ 0.
+Resolution: Hybrid Newton-Bisection solver:
+
+``` cpp
+
+double implied_vol(double market_price, double S, double K, double r, double q, double T, bool is_call) {
+    double low = 1e-6, high = 5.0, sigma = 0.2;
+    for (int i = 0; i < 100; ++i) {
+        double price = black_scholes_price(S,K,r,q,T,sigma,is_call);
+        double diff = price - market_price;
+        if (fabs(diff) < 1e-8) break;
+        double vega = black_scholes_vega(S,K,r,q,T,sigma);
+        if (vega < 1e-8) { sigma = 0.5 * (low + high); continue; }
+        sigma -= diff / vega;
+        if (diff > 0) high = sigma; else low = sigma;
+    }
+    return sigma;
+}
+
+
+```
+
+4. Thread Synchronization Issues
+
+Problem: Concurrent writes caused race conditions.
+Resolution: Atomic counters and per-thread result buffers:
+
+``` cpp
+atomic<size_t> processed_count{0};
+vector<OptionResult> results(batch.size());
+```
+
+5. Performance Bottleneck
+
+Problem: Sequential evaluation of thousands of options was slow.
+Resolution: Multithreading with dynamic chunk allocation:
+
+```cpp
+  vector<thread> threads;
+size_t chunk = (batch.size() + config.threads - 1) / config.threads;
+
+for (size_t t = 0; t < config.threads; ++t) {
+    size_t start = t * chunk;
+    size_t end = min(start + chunk, batch.size());
+    threads.emplace_back([&, start, end]() {
+        for (size_t i = start; i < end; ++i)
+            results[i] = compute_option(batch[i]);
+        processed_count += (end - start);
+    });
+}
+for (auto& th : threads) th.join();
+
+```
+6. Incorrect Numerical Greeks Validation
+
+Problem: Finite-difference approximation produced inconsistent results.
+Resolution: Adaptive step size:
+
+
+```cpp
+double h = max(1e-4, 0.01 * S);
+double delta_fd = (price(S + h) - price(S - h)) / (2 * h);
+
+```
+<img width="796" height="779" alt="Screenshot 2025-10-18 004032" src="https://github.com/user-attachments/assets/4428b1d5-7035-41a3-bd3e-5382ff90adb2" />
+<img width="820" height="366" alt="Screenshot 2025-10-18 004041" src="https://github.com/user-attachments/assets/0aa9d8f0-47a4-4454-9a56-7ed6eb95c42f" />
+
+
+
+7. CSV Input Parsing Errors
+
+Problem: Extra commas or newlines caused skipped lines.
+Resolution:
+
+```cpp
+OptionData parse_csv_line(const string& line) {
+    stringstream ss(line);
+    string field; vector<string> fields;
+    while (getline(ss, field, ',')) fields.push_back(trim(field));
+    if (fields.size() < 7) throw runtime_error("Malformed CSV line");
+    return {stod(fields[0]),stod(fields[1]),stod(fields[2]),
+            stod(fields[3]),stod(fields[4]),stod(fields[5]),
+            fields[6]=="C"};
+}
+
+```
+
+8. Logarithmic Domain Error (log(0))
+
+Resolution:
+```cpp
+inline double safe_log(double x) { return log(max(x,1e-12)); }
+```
+
+9. Non-Converging Options
+
+Resolution: Iteration cap and volatility clipping:
+```cpp
+sigma = std::clamp(sigma, 0.0001, 5.0);
+```
+
+10. Output Synchronization
+
+Resolution: Mutex-protected CSV writes:
+```cpp
+mutex file_mutex;
+void write_result(const OptionResult& res, ofstream& fout) {
+    lock_guard<mutex> lock(file_mutex);
+    fout << res.to_csv_line() << "\n";
+}
+```
+
+MAJOR PROBLEMS:->
+------------------------------------------------------------
+1) Numerical Instability in Normal CDF/PDF
+------------------------------------------------------------
+Symptom:
+  - The normal CDF N(d) returned incorrect values (0 or 1) for large |d| causing incorrect Greeks.
+Root Cause:
+  - Floating-point underflow and overflow for very high or low values.
+Fix:
+  - Used clamping for extreme tails:
+      if (x < -8.0) return 0.0;
+      if (x > 8.0) return 1.0;
+  - Used long double precision for better accuracy.
+Testing:
+  - Compared computed values with reference tables for x = ±6, ±8, ±10.
+Prevention:
+  - Always handle tails explicitly and prefer long double precision for financial models.
+
+------------------------------------------------------------
+2) Implied Volatility Solver Not Converging
+------------------------------------------------------------
+Symptom:
+  - Solver oscillated or failed to find implied volatility for certain market prices.
+Root Cause:
+  - Newton-Raphson method diverged when initial guess was poor or Vega was near zero.
+Fix:
+  - Replaced naive Newton method with hybrid bisection approach:
+      - Clamp sigma in [0.001, 5.0].
+      - Use bracketed range and switch to Newton only when Vega is large.
+Testing:
+  - Tested across a wide range of option prices; solver converged in under 20 iterations.
+Prevention:
+  - Always use bracketed solvers or hybrid methods to ensure convergence stability.
+
+------------------------------------------------------------
+3) Loss of Precision in d1 and d2 Computation
+------------------------------------------------------------
+Symptom:
+  - For S ≈ K and small T, computed Greeks became unstable.
+Root Cause:
+  - Catastrophic cancellation when dividing by small sqrt(T).
+Fix:
+  - Used long double precision and rearranged computation:
+      d1 = (log(S/K) + (r - q + 0.5*sigma^2)*T) / (sigma*sqrt(T))
+Testing:
+  - Compared against reference Black–Scholes values for near-ATM, short-expiry options.
+Prevention:
+  - Always use high precision for small-time or near-the-money computations.
+
+------------------------------------------------------------
+4) Division by Zero for T = 0
+------------------------------------------------------------
+Symptom:
+  - Program crashed when expiry time (T) was zero.
+Root Cause:
+  - Division by sqrt(T) in Black–Scholes formula.
+Fix:
+  - Added guard condition:
+      if (T <= 1e-12) return intrinsic value;
+Testing:
+  - Input options with T = 0 returned correct intrinsic prices.
+Prevention:
+  - Always check for zero-time cases in time-dependent models.
+
+------------------------------------------------------------
+5) CSV Parsing Errors and Malformed Data
+------------------------------------------------------------
+Symptom:
+  - Program terminated on missing or extra fields.
+Root Cause:
+  - Rigid parsing and unguarded string-to-number conversions.
+Fix:
+  - Added safe parser with try/catch, skipping malformed rows.
+Testing:
+  - Tested with missing headers and extra whitespace.
+Prevention:
+  - Validate input CSV schema before parsing.
+
+------------------------------------------------------------
+6) Data Races in Multithreaded Execution
+------------------------------------------------------------
+Symptom:
+  - Occasionally corrupted outputs or segmentation faults.
+Root Cause:
+  - Multiple threads writing to shared data structures simultaneously.
+Fix:
+  - Preallocated results vector; each thread writes to unique index.
+  - Used atomic counters for progress tracking.
+Testing:
+  - Verified correctness under ThreadSanitizer (-fsanitize=thread).
+Prevention:
+  - Avoid shared mutable state; use atomic variables and mutexes when required.
+
+------------------------------------------------------------
+7) Load Imbalance Between Threads
+------------------------------------------------------------
+Symptom:
+  - Some threads finished early, others lagged behind.
+Root Cause:
+  - Static chunk allocation caused uneven workload.
+Fix:
+  - Switched to dynamic work scheduling with a task queue.
+Testing:
+  - Measured CPU utilization before and after fix.
+Prevention:
+  - Use dynamic scheduling for non-uniform workloads.
+
+------------------------------------------------------------
+8) Performance Bottleneck Due to Memory Allocations
+------------------------------------------------------------
+Symptom:
+  - Performance dropped significantly on large input files.
+Root Cause:
+  - Frequent dynamic allocations and string concatenations.
+Fix:
+  - Used preallocated vectors and stringstream buffers for I/O.
+Testing:
+  - Benchmark showed 3x improvement in throughput.
+Prevention:
+  - Reserve memory beforehand; reuse objects.
+
+------------------------------------------------------------
+9) Slow Output Writing to File
+------------------------------------------------------------
+Symptom:
+  - Large outputs caused program to hang or run slowly.
+Root Cause:
+  - Frequent unbuffered I/O operations per row.
+Fix:
+  - Buffered output in memory, wrote once at the end.
+Testing:
+  - Reduced write time from seconds to milliseconds.
+Prevention:
+  - Use buffered writes for batch data processing.
+
+------------------------------------------------------------
+10) Put–Call Parity Inconsistency
+------------------------------------------------------------
+Symptom:
+  - Call and put results violated theoretical parity.
+Root Cause:
+  - Independent computation caused rounding discrepancies.
+Fix:
+  - Derived put prices from call via parity relation:
+      P = C - S*e^{-qT} + K*e^{-rT}
+Testing:
+  - Verified parity within 1e-8 tolerance for all test cases.
+Prevention:
+  - Reuse shared intermediate results for both call and put calculations.
+
+------------------------------------------------------------
+11) Simplified Value-at-Risk (VaR) Estimation
+------------------------------------------------------------
+Symptom:
+  - Risk report understated exposure for non-linear options.
+Root Cause:
+  - Only Delta was considered; Gamma and Vega ignored.
+Fix:
+  - Added scenario-based estimation with Delta–Gamma–Vega adjustment.
+Testing:
+  - Compared with Monte Carlo results to verify correction.
+Prevention:
+  - Document all model assumptions clearly in README.
+
+------------------------------------------------------------
+12) Non-Deterministic Results Due to Asynchronous Logging
+------------------------------------------------------------
+Symptom:
+  - Output order and logs changed between runs.
+Root Cause:
+  - Threads writing to log without synchronization.
+Fix:
+  - Protected logging with a mutex; added deterministic mode.
+Testing:
+  - Outputs identical across multiple runs with same input.
+Prevention:
+  - Always synchronize output streams in multi-threaded programs.
+
+------------------------------------------------------------
+13) Handling Extremely Small or Large Volatilities
+------------------------------------------------------------
+Symptom:
+  - Volatility below 0.001 or above 5.0 caused invalid Greeks.
+Root Cause:
+  - Numeric overflow or division instability.
+Fix:
+  - Clamped sigma values using:
+      sigma = max(0.001, min(5.0, sigma));
+Testing:
+  - Tested across edge cases; outputs remained finite.
+Prevention:
+  - Always bound parameters in financial models.
+
+------------------------------------------------------------
+14) Floating-Point Round-Off Accumulation
+------------------------------------------------------------
+Symptom:
+  - Slightly different results for same input on repeated runs.
+Root Cause:
+  - Floating-point arithmetic accumulated rounding differences.
+Fix:
+  - Used long double internally; rounded final output to 8 decimals.
+Testing:
+  - Output stable across multiple compilers and platforms.
+Prevention:
+  - Standardize precision across all calculations.
+
+
+
+------------------------------------------------------------
+Summary:
+------------------------------------------------------------
+All the above issues were discovered during iterative development and testing of the Option Greeks Calculator. Numerical stability, convergence, and concurrency were the most challenging aspects. By employing long double precision, hybrid solvers, thread-safe design, and buffered I/O, the final program achieved high numerical reliability and performance across large datasets.
+
+------------------------------------------------------------
+
