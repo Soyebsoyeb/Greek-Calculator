@@ -7,7 +7,7 @@ The system implements the Black-Scholes-Merton model under the following assumpt
 
 (i) Geometric Brownian Motion for underlying asset price:
 
-dS = μS dt + σS dW
+$$ dS = μS dt + σS dW $$
 
 S: Underlying asset price
 μ: Drift rate (risk-neutral: r - q)
