@@ -1,20 +1,57 @@
-# Greek-Calculator
+𝑉
+(
+0
+,
+𝑡
+)
+=
+0
+V(0,t)=0
 
-Mathematical Foundations
+𝑉
+(
+𝑆
+,
+𝑡
+)
+→
+𝑆
+→
+∞
+𝑆
+−
+𝐾
+𝑒
+−
+𝑟
+(
+𝑇
+−
+𝑡
+)
+V(S,t)
+S→∞
+	​
 
-Stochastic Calculus Framework
-The system implements the Black-Scholes-Merton model under the following assumptions:
+S−Ke
+−r(T−t)
 
-(i) Geometric Brownian Motion for underlying asset price:
+𝑉
+(
+𝑆
+,
+𝑇
+)
+=
+max
+⁡
+(
+𝑆
+−
+𝐾
+,
+0
+)
+V(S,T)=max(S−K,0)
 
-$$ dS = μS dt + σS dW $$
-
-S: Underlying asset price
-μ: Drift rate (risk-neutral: r - q)
-σ: Volatility (constant)
-dW: Wiener process increment
-
-(ii) Risk-Neutral Valuation:
-
-$$ E^Q[V(S,T)] = e^{-rT} E[V(S,T)] $$
-
+Put
