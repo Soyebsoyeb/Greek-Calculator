@@ -1,0 +1,14 @@
+PORTFOLIO RISK REPORT
+====================
+Total Options: 50
+
+GREEKS EXPOSURE:
+Delta: 4.5531 (Exposure: $455.3088)
+Gamma: 1.1535 (Exposure: $5767.2759)
+Vega: 15.7917 (Exposure: $1579.1677 per 1%)
+Theta: -1.3011 per day
+Rho: 0.6888 per 1%
+
+RISK METRICS:
+VaR 95%: $-0.3653
+Expected Shortfall: $-0.4118

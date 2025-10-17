@@ -1,0 +1,8 @@
+BATCH PROCESSING SUMMARY
+========================
+Total options processed: 50
+Total portfolio value: 321.253
+Total delta: 3.77368
+Total gamma: 1.15346
+Total vega: 15.7917
+Average price: 6.42505
